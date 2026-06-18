@@ -21,8 +21,14 @@ except ImportError:
     folder_paths = None
 
 
-WD_REPO_ID = "SmilingWolf/wd-eva02-large-tagger-v3"
-WD_SUBDIR = "wd-eva02-large-tagger-v3"
+WD_VARIANT_REPOS = {
+    "vit": "SmilingWolf/wd-vit-tagger-v3",
+    "convnext": "SmilingWolf/wd-convnext-tagger-v3",
+    "swinv2": "SmilingWolf/wd-swinv2-tagger-v3",
+    "vit-large": "SmilingWolf/wd-vit-large-tagger-v3",
+    "eva02-large": "SmilingWolf/wd-eva02-large-tagger-v3",
+}
+WD_DEFAULT_VARIANT = "eva02-large"
 WD_FILES = ("model.onnx", "selected_tags.csv")
 WD_RATING_CATEGORY = 9
 WD_UNSAFE_RATING_NAMES = ("questionable", "explicit")
@@ -84,17 +90,25 @@ def numpy_to_pil_batch(images: torch.Tensor) -> list[Image.Image]:
     return [Image.fromarray(frame) for frame in array]
 
 
-def load_wd_tagger():
-    if "wd" in _CACHE:
-        return _CACHE["wd"]
+def load_wd_tagger(variant: str):
+    if variant not in WD_VARIANT_REPOS:
+        raise ValueError(
+            f"Unknown WD tagger variant '{variant}'. "
+            f"Expected one of {list(WD_VARIANT_REPOS)}."
+        )
+    cache_key = f"wd_{variant}"
+    if cache_key in _CACHE:
+        return _CACHE[cache_key]
 
     with _LOAD_LOCK:
-        if "wd" in _CACHE:
-            return _CACHE["wd"]
+        if cache_key in _CACHE:
+            return _CACHE[cache_key]
 
         import onnxruntime as ort
 
-        model_dir = ensure_files(WD_REPO_ID, get_subdir(WD_SUBDIR), WD_FILES)
+        repo_id = WD_VARIANT_REPOS[variant]
+        subdir = f"wd-{variant}-tagger-v3"
+        model_dir = ensure_files(repo_id, get_subdir(subdir), WD_FILES)
         tags_df = pd.read_csv(model_dir / "selected_tags.csv")
 
         rating_rows = tags_df[tags_df["category"] == WD_RATING_CATEGORY]
@@ -117,8 +131,8 @@ def load_wd_tagger():
         _, height, width, _ = input_meta.shape
         target_size = int(height) if isinstance(height, int) else 448
 
-        _CACHE["wd"] = (session, input_name, target_size, unsafe_indices, rating_indices)
-        return _CACHE["wd"]
+        _CACHE[cache_key] = (session, input_name, target_size, unsafe_indices, rating_indices)
+        return _CACHE[cache_key]
 
 
 def preprocess_for_wd(pil_image: Image.Image, target_size: int) -> np.ndarray:
@@ -140,8 +154,8 @@ def preprocess_for_wd(pil_image: Image.Image, target_size: int) -> np.ndarray:
     return array
 
 
-def run_wd_tagger(pil_images: list[Image.Image]) -> np.ndarray:
-    session, input_name, target_size, unsafe_indices, _ = load_wd_tagger()
+def run_wd_tagger(pil_images: list[Image.Image], variant: str) -> np.ndarray:
+    session, input_name, target_size, unsafe_indices, _ = load_wd_tagger(variant)
     batch = np.stack([preprocess_for_wd(p, target_size) for p in pil_images], axis=0)
     outputs = session.run(None, {input_name: batch})[0]
     return outputs[:, list(unsafe_indices)]
@@ -263,6 +277,10 @@ class ImageSafetyGateNode:
         return {
             "required": {
                 "images": ("IMAGE",),
+                "wd_variant": (
+                    list(WD_VARIANT_REPOS),
+                    {"default": WD_DEFAULT_VARIANT},
+                ),
                 "sensitivity": (
                     "FLOAT",
                     {"default": 0.6, "min": 0.0, "max": 1.0, "step": 0.1},
@@ -286,13 +304,14 @@ class ImageSafetyGateNode:
     def nsfw_checker(
         self,
         images: torch.Tensor,
+        wd_variant: str,
         sensitivity: float,
         nsfw_threshold: float,
         nsfl_threshold: float,
     ):
         pil_images = numpy_to_pil_batch(images)
 
-        wd_unsafe_scores = run_wd_tagger(pil_images)
+        wd_unsafe_scores = run_wd_tagger(pil_images, wd_variant)
 
         clip_model, clip_processor = load_clip_safety_model()
         clip_inputs = clip_processor(pil_images, return_tensors="pt")
@@ -328,7 +347,7 @@ class ImageSafetyGateNode:
             verdict = wd_unsafe or clip_unsafe or nsfl_unsafe
             any_unsafe = any_unsafe or verdict
             print(
-                f"[safety-gate] wd: questionable={q_score:.3f} explicit={e_score:.3f} "
+                f"[safety-gate] wd({wd_variant}): questionable={q_score:.3f} explicit={e_score:.3f} "
                 f"sum={wd_total:.3f}/{nsfw_threshold:.2f} -> "
                 f"{'UNSAFE' if wd_unsafe else 'SAFE'} | "
                 f"clip: max={clip_max:+.3f} sens={sensitivity:.2f} -> "

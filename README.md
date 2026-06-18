@@ -3,70 +3,105 @@
 ComfyUI custom node combining three safety signals with boolean OR. Tuned for
 workflows that generate **illustration / anime-style** content.
 
-1. [SmilingWolf/wd-eva02-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3)
-   — WaifuDiffusion tagger v3 (ONNX). Trained on Danbooru illustrations.
-   Returns rating probabilities: `general`, `sensitive`, `questionable`,
-   `explicit`. We treat `questionable + explicit` as the unsafe signal.
+1. [SmilingWolf wd-tagger v3 family](https://huggingface.co/SmilingWolf) (ONNX)
+   — WaifuDiffusion tagger v3. Trained on Danbooru illustrations. Returns
+   rating probabilities `general / sensitive / questionable / explicit`. We
+   treat `questionable + explicit` as the unsafe signal. Five variants are
+   selectable from the node (see [WD tagger variants](#wd-tagger-variants)).
 2. [CompVis/stable-diffusion-safety-checker](https://huggingface.co/CompVis/stable-diffusion-safety-checker)
    — CLIP-based concept similarity checker (same model the previous
    `ComfyUI-safety-checker` used). Sensitivity slider matches the old node.
 3. [OwenElliott/image-safety-classifier-s](https://huggingface.co/OwenElliott/image-safety-classifier-s)
-   — SwiftFormer-based NSFL / NSFW / SFW classifier. We use only the **NSFL**
-   dimension (gore / violence). The NSFW dimension of this model is biased
-   toward real-photo data and over-triggers on illustration content, but its
-   NSFL dimension stays calm on illustrations and lights up on actual
-   gore / violence — empirically the cleanest illustration-friendly NSFL
-   signal available.
+   — SwiftFormer-based NSFL / NSFW / SFW classifier. We use **only the NSFL
+   dimension** (gore / violence). The NSFW dimension over-triggers on
+   illustrations, but the NSFL dimension empirically stays calm on
+   illustrations and lights up on actual gore / violence.
 
 Why this stack:
 - WD tagger covers anime-style NSFW (sexual content) without illustration
   false positives.
-- CLIP covers concept matches that WD might miss.
+- CLIP catches concept matches that WD might miss.
 - image-safety-classifier-s NSFL covers gore / violence, which WD does not
-  separate cleanly (Danbooru classifies blood/killing under "safe" rating).
+  separate cleanly (Danbooru classifies blood / killing under "safe" rating).
 
-OR keeps the policy conservative: block if any signal flags the image.
+OR keeps the policy conservative: block if any of the three flags the image.
+
+## Comparison With Existing ComfyUI Safety Nodes
+
+| Node | Illustration-friendly | NSFW | NSFL / gore | Output | Drop-in compatible |
+|------|-----------------------|------|-------------|--------|--------------------|
+| `monkeykim111/ComfyUI-safety-checker` (CLIP only) | partial (CLIP) | yes | no | `(IMAGE, BOOLEAN)` | — |
+| `trumanwong/ComfyUI-NSFW-Detection` (ViT NSFW) | no (real-photo trained) | yes | no | replaces image | — |
+| `BetaDoggo/ComfyUI-YetAnotherSafetyChecker` (CLIP) | partial (CLIP) | yes | no | replaces image | no (no `nsfw` BOOLEAN) |
+| ComfyUI Rating Checker (NudeNet-based) | partial | yes (R15 / R18) | no | rating string | no |
+| **This node** | **yes (WD tagger + NSFL signal)** | **yes** | **yes** | `(IMAGE, BOOLEAN)` | **yes** (matches CompVis-style `(IMAGE, nsfw)` signature) |
+
+If you currently use `monkeykim111/ComfyUI-safety-checker`, you can swap this
+node into the same socket without touching the rest of the workflow — the
+`(IMAGE, nsfw)` shape is identical.
 
 ## Output
 
-- `IMAGE`: input image, unmodified (no censoring is applied)
-- `nsfw` (BOOLEAN): `True` if either WD tagger or CLIP flags it as unsafe
+- `IMAGE`: input image, unmodified (no censoring is applied here)
+- `nsfw` (BOOLEAN): `True` if **any** of WD tagger, CLIP, or NSFL flags it
+  as unsafe
 
 For multi-image batches, `nsfw` is `True` if any image in the batch is flagged.
 
 ## Inputs
 
-| name              | type    | default | notes                                                                |
-|-------------------|---------|---------|----------------------------------------------------------------------|
-| `images`          | IMAGE   | -       | Standard ComfyUI image tensor                                        |
-| `sensitivity`     | FLOAT   | `0.6`   | CLIP safety checker sensitivity (matches the old node value)         |
-| `nsfw_threshold`  | FLOAT   | `0.35`  | WD tagger threshold on `rating_questionable + rating_explicit`       |
-| `nsfl_threshold`  | FLOAT   | `0.5`   | image-safety-classifier-s threshold on NSFL probability              |
+| name              | type             | default        | notes                                                                 |
+|-------------------|------------------|----------------|-----------------------------------------------------------------------|
+| `images`          | IMAGE            | -              | Standard ComfyUI image tensor                                         |
+| `wd_variant`      | choice           | `eva02-large`  | Which WD tagger v3 variant to use (see table below)                   |
+| `sensitivity`     | FLOAT            | `0.6`          | CLIP safety checker sensitivity (matches the old node value)          |
+| `nsfw_threshold`  | FLOAT            | `0.35`         | WD tagger threshold on `rating_questionable + rating_explicit`        |
+| `nsfl_threshold`  | FLOAT            | `0.5`          | image-safety-classifier-s threshold on NSFL probability               |
 
-Sensitivity reference (CLIP path):
+### WD tagger variants
+
+All variants are from SmilingWolf's v3 series. Larger models are slower /
+heavier but more accurate. All produce the same rating layout, so swapping
+variants does not require threshold retuning.
+
+| `wd_variant`   | repo                                                                                  | size  | typical use                |
+|----------------|---------------------------------------------------------------------------------------|-------|----------------------------|
+| `vit`          | [SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3)             | ~400MB | fastest, low VRAM         |
+| `convnext`     | [SmilingWolf/wd-convnext-tagger-v3](https://huggingface.co/SmilingWolf/wd-convnext-tagger-v3)   | ~400MB | alternative to `vit`       |
+| `swinv2`       | [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3)       | ~400MB | alternative to `vit`       |
+| `vit-large`    | [SmilingWolf/wd-vit-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-large-tagger-v3) | ~1.1GB | middle ground              |
+| `eva02-large`  | [SmilingWolf/wd-eva02-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3) | ~1.6GB | most accurate (default)    |
+
+The selected variant is downloaded on first use into
+`ComfyUI/models/safety_checker/wd-<variant>-tagger-v3/`. Each variant is
+cached separately, so switching does not re-download.
+
+### Sensitivity / threshold reference
+
+CLIP sensitivity:
 
 - `0.0`: least sensitive
 - `0.5`: explicit nudity threshold
 - `1.0`: most sensitive (catches lingerie-like content)
 
-WD tagger rating threshold reference:
+WD tagger threshold (sum of `questionable + explicit`):
 
 - `>= 0.50`: high confidence NSFW
 - `0.30 - 0.50`: borderline / sensitive content
 - `< 0.30`: likely SFW
 
-NSFL threshold reference (image-safety-classifier-s NSFL dimension):
+NSFL threshold (image-safety-classifier-s NSFL dimension):
 
 - `>= 0.50`: clear gore / dismemberment / corpse content (default)
-- `0.15 - 0.50`: light blood / wound content (lower threshold catches more)
+- `0.15 - 0.50`: light blood / wound content (lower catches more)
 - `< 0.15`: essentially no violence signal — most illustration content sits
-  here regardless of the depicted scene
+  here regardless of depicted scene
 
 ## Install
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone <this repo> ComfyUI-Image-Safety-Gate
+git clone https://github.com/monkeykim111/ComfyUI-Image-Safety-Gate
 pip install -r ComfyUI-Image-Safety-Gate/requirements.txt
 ```
 
@@ -74,10 +109,11 @@ Restart ComfyUI.
 
 ## Model Files
 
-On first use both models download into:
+On first use, the three models download into the standard `safety_checker`
+folder:
 
 ```text
-ComfyUI/models/safety_checker/wd-eva02-large-tagger-v3/
+ComfyUI/models/safety_checker/wd-<variant>-tagger-v3/
 ├── model.onnx
 └── selected_tags.csv
 
@@ -91,13 +127,16 @@ ComfyUI/models/safety_checker/image-safety-classifier-s/
 └── model.safetensors
 ```
 
-If files already exist (e.g., previously downloaded for `ComfyUI-safety-checker`
-or `ComfyUI-image-safety-classifier`), no network access is made.
+If files already exist (e.g., previously downloaded for
+`ComfyUI-safety-checker` or `ComfyUI-image-safety-classifier`), no network
+access is made.
 
 ## Notes
 
-- Both models cached in memory per process.
+- All models are cached in memory per process. WD variants are cached per
+  variant key, so toggling between variants in a session does not reload.
 - WD tagger runs via `onnxruntime` (CPU or GPU automatically depending on the
-  installed provider). CLIP runs on CPU to match the original node's behaviour.
-- Per-image log line shows each model's decision and the final OR result, so
-  disagreement cases are visible for later threshold tuning.
+  installed provider). CLIP runs on CPU to match the original node's exact
+  numerical behaviour. NSFL runs on GPU when CUDA is available.
+- Per-image log line shows each signal's decision and the final OR result,
+  so disagreement cases are visible for later threshold tuning.
