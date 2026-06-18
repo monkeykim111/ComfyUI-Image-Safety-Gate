@@ -26,20 +26,6 @@ Why this stack:
 
 OR keeps the policy conservative: block if any of the three flags the image.
 
-## Comparison With Existing ComfyUI Safety Nodes
-
-| Node | Illustration-friendly | NSFW | NSFL / gore | Output | Drop-in compatible |
-|------|-----------------------|------|-------------|--------|--------------------|
-| `monkeykim111/ComfyUI-safety-checker` (CLIP only) | partial (CLIP) | yes | no | `(IMAGE, BOOLEAN)` | — |
-| `trumanwong/ComfyUI-NSFW-Detection` (ViT NSFW) | no (real-photo trained) | yes | no | replaces image | — |
-| `BetaDoggo/ComfyUI-YetAnotherSafetyChecker` (CLIP) | partial (CLIP) | yes | no | replaces image | no (no `nsfw` BOOLEAN) |
-| ComfyUI Rating Checker (NudeNet-based) | partial | yes (R15 / R18) | no | rating string | no |
-| **This node** | **yes (WD tagger + NSFL signal)** | **yes** | **yes** | `(IMAGE, BOOLEAN)` | **yes** (matches CompVis-style `(IMAGE, nsfw)` signature) |
-
-If you currently use `monkeykim111/ComfyUI-safety-checker`, you can swap this
-node into the same socket without touching the rest of the workflow — the
-`(IMAGE, nsfw)` shape is identical.
-
 ## Output
 
 - `IMAGE`: input image, unmodified (no censoring is applied here)
