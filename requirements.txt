@@ -1,0 +1,8 @@
+onnxruntime
+transformers
+huggingface_hub
+timm
+safetensors
+pillow
+numpy
+pandas

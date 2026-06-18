@@ -1,0 +1,17 @@
+[project]
+name = "comfyui-image-safety-gate"
+description = "ComfyUI custom node combining SmilingWolf WD EVA02 Large Tagger v3 (anime rating) and CompVis stable-diffusion-safety-checker (CLIP) with boolean OR for illustration-friendly NSFW detection."
+version = "0.1.0"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "onnxruntime",
+    "transformers",
+    "huggingface_hub",
+    "pillow",
+    "numpy",
+    "pandas",
+]
+
+[project.urls]
+WDTagger = "https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3"
+CLIPSafetyChecker = "https://huggingface.co/CompVis/stable-diffusion-safety-checker"
